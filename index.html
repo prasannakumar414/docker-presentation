@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docker — Deep Dive Presentation</title>
+<style>
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-snap-type:y mandatory;scroll-behavior:smooth;overflow-x:hidden;font-size:16px}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg-primary);color:var(--text-primary);line-height:1.6;overflow-x:hidden;background-image:radial-gradient(rgba(13,183,237,0.03) 1px,transparent 1px);background-size:30px 30px}
+
+/* ============================================================
+   THEME VARIABLES
+   ============================================================ */
+:root{
+  --docker-blue:#0db7ed;
+  --docker-dark:#003f8a;
+  --bg-primary:#0a0e17;
+  --bg-secondary:#111827;
+  --bg-card:#1a2332;
+  --bg-card-hover:#1f2b3d;
+  --text-primary:#e8edf5;
+  --text-secondary:#8892a4;
+  --accent:#0db7ed;
+  --accent-glow:rgba(13,183,237,0.25);
+  --accent-light:#5bcefa;
+  --success:#2ecc71;
+  --danger:#e74c3c;
+  --warning:#f39c12;
+  --purple:#9b59b6;
+  --radius:12px;
+  --radius-sm:8px;
+  --transition:0.3s ease;
+  --shadow:0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ============================================================
+   PROGRESS BAR
+   ============================================================ */
+#progress-bar{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--docker-blue),var(--accent-light));z-index:1000;transition:width .35s ease;width:0}
+
+/* ============================================================
+   NAVIGATION DOTS
+   ============================================================ */
+#nav-dots{position:fixed;right:24px;top:50%;transform:translateY(-50%);z-index:999;display:flex;flex-direction:column;gap:10px}
+.nav-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--text-secondary);background:transparent;cursor:pointer;transition:var(--transition);position:relative}
+.nav-dot:hover{border-color:var(--accent);background:var(--accent-glow)}
+.nav-dot.active{border-color:var(--accent);background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
+.nav-dot .tooltip{position:absolute;right:24px;top:50%;transform:translateY(-50%);background:var(--bg-card);color:var(--text-primary);padding:4px 10px;border-radius:6px;font-size:.75rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s}
+.nav-dot:hover .tooltip{opacity:1}
+
+/* ============================================================
+   SLIDE COUNTER
+   ============================================================ */
+#slide-counter{position:fixed;bottom:24px;right:24px;z-index:999;font-size:.85rem;color:var(--text-secondary);background:var(--bg-card);padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.06)}
+
+/* ============================================================
+   SLIDE BASE
+   ============================================================ */
+.slide{width:100vw;height:100vh;scroll-snap-align:start;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;padding:60px 80px;overflow:hidden}
+.slide::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(13,183,237,0.04) 0%,transparent 60%);pointer-events:none}
+.slide-number{position:absolute;top:24px;left:32px;font-size:.75rem;color:var(--text-secondary);opacity:.5;letter-spacing:2px;text-transform:uppercase}
+
+/* ============================================================
+   COMMON ANIMATIONS
+   ============================================================ */
+@keyframes fadeInUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeInDown{from{opacity:0;transform:translateY(-30px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeInLeft{from{opacity:0;transform:translateX(-30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes fadeInRight{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes scaleIn{from{opacity:0;transform:scale(0.8)}to{opacity:1;transform:scale(1)}}
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 5px var(--accent-glow)}50%{box-shadow:0 0 20px var(--accent-glow),0 0 40px rgba(13,183,237,0.1)}}
+@keyframes typing{from{width:0}to{width:58ch}}
+@keyframes blink{0%,100%{border-color:var(--accent)}50%{border-color:transparent}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:translateY(0)}}
+@keyframes ripple{to{transform:scale(2);opacity:0}}
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+
+.anim-target{opacity:0}
+.slide.active .anim-target{animation:fadeInUp .6s ease forwards}
+.slide.active .anim-target:nth-child(2){animation-delay:.1s}
+.slide.active .anim-target:nth-child(3){animation-delay:.2s}
+.slide.active .anim-target:nth-child(4){animation-delay:.3s}
+.slide.active .anim-target:nth-child(5){animation-delay:.4s}
+.slide.active .anim-target:nth-child(6){animation-delay:.5s}
+
+h1{font-size:2.8rem;font-weight:700;letter-spacing:-0.5px;margin-bottom:12px}
+h2{font-size:2rem;font-weight:600;margin-bottom:8px}
+h3{font-size:1.3rem;font-weight:600;margin-bottom:6px}
+.accent{color:var(--accent)}
+.subtitle{color:var(--text-secondary);font-size:1.1rem;margin-bottom:24px}
+.tag{display:inline-block;padding:3px 12px;border-radius:20px;font-size:.75rem;background:var(--accent-glow);color:var(--accent);border:1px solid rgba(13,183,237,0.2);margin:2px}
+
+/* ============================================================
+   CARDS
+   ============================================================ */
+.card{background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius);padding:28px;transition:var(--transition)}
+.card:hover{background:var(--bg-card-hover);border-color:rgba(13,183,237,0.15);transform:translateY(-2px);box-shadow:var(--shadow)}
+
+/* ============================================================
+   SLIDE 1 — DOCKER INTRO
+   ============================================================ */
+.whale-container{margin-bottom:32px;animation:float 4s ease-in-out infinite;filter:drop-shadow(0 8px 32px rgba(13,183,237,0.3))}
+.typing-text{display:inline-block;overflow:hidden;white-space:nowrap;border-right:3px solid var(--accent);font-size:1.3rem;color:var(--text-secondary);width:0;letter-spacing:.5px;animation:blink .7s step-end infinite}
+.slide.active .typing-text{animation:typing 2.5s steps(55,end) .5s forwards,blink .7s step-end infinite}
+.intro-badges{display:flex;gap:12px;margin-top:20px;flex-wrap:wrap;justify-content:center}
+.intro-badges .tag{font-size:.85rem;padding:6px 16px}
+
+/* ============================================================
+   SLIDE 2 — HISTORY TIMELINE
+   ============================================================ */
+.timeline{position:relative;padding:20px 0;max-width:800px;width:100%}
+.timeline::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,transparent,var(--accent),transparent);transform:translateX(-50%)}
+.timeline-entry{display:flex;align-items:center;margin-bottom:28px;opacity:0;position:relative}
+.slide.active .timeline-entry{animation:fadeInUp .5s ease forwards}
+.slide.active .timeline-entry:nth-child(1){animation-delay:.1s}
+.slide.active .timeline-entry:nth-child(2){animation-delay:.25s}
+.slide.active .timeline-entry:nth-child(3){animation-delay:.4s}
+.slide.active .timeline-entry:nth-child(4){animation-delay:.55s}
+.slide.active .timeline-entry:nth-child(5){animation-delay:.7s}
+.slide.active .timeline-entry:nth-child(6){animation-delay:.85s}
+.slide.active .timeline-entry:nth-child(7){animation-delay:1s}
+.slide.active .timeline-entry:nth-child(8){animation-delay:1.15s}
+.timeline-entry:nth-child(odd){flex-direction:row-reverse;text-align:right}
+.timeline-year{flex:0 0 auto;width:80px;font-size:1.1rem;font-weight:700;color:var(--accent);text-align:center;position:relative;z-index:2}
+.timeline-year::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;background:var(--accent);border-radius:50%;border:3px solid var(--bg-primary);box-shadow:0 0 10px var(--accent-glow)}
+.timeline-content{flex:1;padding:12px 24px}
+.timeline-content h3{font-size:1rem;color:var(--text-primary);margin-bottom:2px}
+.timeline-content p{font-size:.85rem;color:var(--text-secondary)}
+.timeline-entry:nth-child(odd) .timeline-content{padding-right:40px}
+.timeline-entry:nth-child(even) .timeline-content{padding-left:40px}
+
+/* ============================================================
+   SLIDE 3 — DOCKER vs VM
+   ============================================================ */
+.comparison{display:flex;gap:48px;align-items:stretch;width:100%;max-width:900px;justify-content:center}
+.comparison-col{flex:1;max-width:380px}
+.comparison-col h3{text-align:center;margin-bottom:16px;font-size:1.2rem}
+.stack{display:flex;flex-direction:column-reverse;gap:0;border-radius:var(--radius);overflow:hidden;border:1px solid rgba(255,255,255,0.06)}
+.stack-layer{padding:16px;text-align:center;font-size:.85rem;font-weight:600;opacity:0;transform:translateY(20px)}
+.slide.active .stack-layer{animation:slideUp .4s ease forwards}
+.stack-layer.l-hardware{background:#2d1f3d;color:#d4a5ff;animation-delay:.1s !important}
+.stack-layer.l-hypervisor{background:#1f2d3d;color:#a5c4ff;animation-delay:.25s !important}
+.stack-layer.l-hostos{background:#1f2d3d;color:#a5c4ff;animation-delay:.25s !important}
+.stack-layer.l-guestos{background:#2d2d1f;color:#ffd6a5;animation-delay:.4s !important}
+.stack-layer.l-engine{background:#0d2937;color:var(--accent);animation-delay:.4s !important}
+.stack-layer.l-bins{background:#1f3d2d;color:#a5ffba;animation-delay:.55s !important}
+.stack-layer.l-app{background:#0a3d3d;color:#7cfcfc;animation-delay:.7s !important}
+.vs-badge{flex:0 0 auto;font-size:2rem;font-weight:800;color:var(--text-secondary);align-self:center;opacity:.3}
+.comparison-summary{display:flex;gap:24px;margin-top:28px;max-width:900px;width:100%}
+.comparison-summary .card{flex:1;text-align:center;padding:14px 18px}
+.comparison-summary .card h4{font-size:.85rem;color:var(--accent);margin-bottom:4px}
+.comparison-summary .card p{font-size:.8rem;color:var(--text-secondary)}
+
+/* ============================================================
+   SLIDE 4 — CGROUPS & NAMESPACES
+   ============================================================ */
+.concepts-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:900px;width:100%}
+.concept-card{background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius);padding:32px;text-align:center}
+.concept-card:hover{border-color:rgba(13,183,237,0.2);box-shadow:0 0 30px rgba(13,183,237,0.08)}
+.concept-icon{font-size:3rem;margin-bottom:16px;display:block}
+.concept-card h3{color:var(--accent);margin-bottom:8px}
+.concept-card p{color:var(--text-secondary);font-size:.9rem;margin-bottom:16px}
+.concept-items{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+
+/* ============================================================
+   SLIDE 5 — CGROUPS/NAMESPACES INTERACTIVE
+   ============================================================ */
+.interactive-panel{display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:950px;width:100%}
+.ctrl-section{background:var(--bg-card);border-radius:var(--radius);padding:28px;border:1px solid rgba(255,255,255,0.06)}
+.ctrl-section h3{color:var(--accent);margin-bottom:18px;font-size:1.1rem}
+.slider-group{margin-bottom:20px}
+.slider-group label{display:flex;justify-content:space-between;font-size:.85rem;color:var(--text-secondary);margin-bottom:6px}
+.slider-group label span{color:var(--accent);font-weight:600}
+input[type=range]{-webkit-appearance:none;width:100%;height:6px;border-radius:3px;background:#1a2332;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 8px var(--accent-glow)}
+.ns-toggles{display:flex;flex-wrap:wrap;gap:8px}
+.ns-btn{padding:8px 16px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.1);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;font-size:.8rem;transition:var(--transition)}
+.ns-btn.on{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 0 12px var(--accent-glow)}
+.process-viz{background:var(--bg-secondary);border-radius:var(--radius);padding:20px;margin-top:16px;min-height:120px;font-family:'Courier New',monospace;font-size:.8rem;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.04)}
+.process-viz .viz-bar{height:16px;border-radius:4px;background:var(--accent);margin:4px 0;transition:width .4s ease;box-shadow:0 0 8px var(--accent-glow)}
+.process-viz .viz-label{font-size:.7rem;margin-top:2px;color:var(--text-secondary)}
+
+/* ============================================================
+   SLIDES 6-11 — ARCHITECTURE
+   ============================================================ */
+.arch-layout{display:flex;gap:32px;max-width:1100px;width:100%;align-items:flex-start}
+.arch-diagram{flex:2;position:relative}
+.arch-panel{flex:1;background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid rgba(255,255,255,0.06);min-height:300px}
+.arch-panel h3{color:var(--accent);margin-bottom:12px}
+.arch-panel p{color:var(--text-secondary);font-size:.9rem;line-height:1.7}
+.arch-svg{width:100%;height:auto}
+.arch-svg .component{cursor:pointer;transition:var(--transition)}
+.arch-svg .component:hover{filter:brightness(1.3)}
+.arch-svg .component.highlight{filter:brightness(1.4) drop-shadow(0 0 8px var(--accent))}
+.arch-svg .arrow{stroke:var(--text-secondary);stroke-width:2;fill:none;opacity:.4;transition:var(--transition)}
+.arch-svg .arrow.highlight{stroke:var(--accent);opacity:1;stroke-width:3}
+.arch-svg text{fill:var(--text-primary);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px}
+
+.cmd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;max-width:950px;width:100%}
+.cmd-card{background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius);padding:20px;cursor:pointer;transition:var(--transition)}
+.cmd-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.cmd-card.expanded{border-color:var(--accent);background:var(--bg-card-hover)}
+.cmd-card code{color:var(--accent);font-size:1rem;font-weight:600}
+.cmd-card p{color:var(--text-secondary);font-size:.82rem;margin-top:6px}
+.cmd-card .cmd-example{margin-top:12px;background:var(--bg-primary);border-radius:var(--radius-sm);padding:12px;font-family:'Courier New',monospace;font-size:.8rem;color:var(--accent-light);display:none;border:1px solid rgba(255,255,255,0.04)}
+.cmd-card.expanded .cmd-example{display:block;animation:fadeInUp .3s ease}
+
+.flow-container{max-width:900px;width:100%}
+.flow-steps{display:flex;flex-direction:column;gap:0;position:relative}
+.flow-step{display:flex;align-items:center;gap:16px;padding:16px;border-radius:var(--radius);background:var(--bg-card);border:1px solid rgba(255,255,255,0.04);opacity:0;transform:translateX(-20px);transition:all .5s ease}
+.flow-step.visible{opacity:1;transform:translateX(0)}
+.flow-step.active-step{border-color:var(--accent);box-shadow:0 0 20px rgba(13,183,237,0.1)}
+.flow-step .step-icon{width:40px;height:40px;border-radius:50%;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.flow-step .step-text h4{font-size:.95rem;color:var(--text-primary)}
+.flow-step .step-text p{font-size:.8rem;color:var(--text-secondary)}
+.flow-connector{width:2px;height:20px;background:var(--accent);margin-left:35px;opacity:.3}
+
+.lifecycle-container{max-width:900px;width:100%}
+.lifecycle-track{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-bottom:32px}
+.lc-node{padding:14px 22px;border-radius:var(--radius);background:var(--bg-card);border:2px solid rgba(255,255,255,0.06);text-align:center;cursor:pointer;transition:var(--transition);min-width:110px}
+.lc-node:hover,.lc-node.active-node{border-color:var(--accent);box-shadow:0 0 15px var(--accent-glow)}
+.lc-node h4{font-size:.85rem;color:var(--accent)}
+.lc-node p{font-size:.72rem;color:var(--text-secondary)}
+.lc-arrow{color:var(--text-secondary);font-size:1.2rem;opacity:.4}
+.shim-visual{display:flex;gap:24px;justify-content:center}
+.shim-box{background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius);padding:20px;text-align:center;flex:1;max-width:250px}
+.shim-box h4{font-size:.9rem;color:var(--accent);margin-bottom:4px}
+.shim-box p{font-size:.78rem;color:var(--text-secondary)}
+
+.runtime-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;max-width:900px;width:100%}
+.runtime-card{background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius);padding:24px;text-align:center;transition:var(--transition)}
+.runtime-card:hover{transform:translateY(-3px);border-color:var(--accent)}
+.runtime-card h4{color:var(--accent);font-size:1rem;margin-bottom:6px}
+.runtime-card p{color:var(--text-secondary);font-size:.82rem}
+.runtime-card .rt-badge{margin-top:10px;display:inline-block;padding:3px 10px;border-radius:12px;font-size:.7rem}
+.rt-default{background:rgba(13,183,237,0.15);color:var(--accent)}
+.rt-fast{background:rgba(46,204,113,0.15);color:var(--success)}
+.rt-secure{background:rgba(155,89,182,0.15);color:var(--purple)}
+
+/* ============================================================
+   SLIDE 12 — QUIZ
+   ============================================================ */
+.quiz-container{max-width:700px;width:100%}
+.quiz-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+.quiz-score{font-size:1.1rem;color:var(--accent);font-weight:600}
+.quiz-progress{color:var(--text-secondary);font-size:.9rem}
+.quiz-question{background:var(--bg-card);border-radius:var(--radius);padding:28px;border:1px solid rgba(255,255,255,0.06)}
+.quiz-question h3{font-size:1.1rem;margin-bottom:20px;color:var(--text-primary)}
+.quiz-options{display:flex;flex-direction:column;gap:10px}
+.quiz-opt{padding:14px 20px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.08);background:var(--bg-secondary);cursor:pointer;transition:var(--transition);color:var(--text-primary);font-size:.9rem}
+.quiz-opt:hover:not(.disabled){border-color:var(--accent);background:rgba(13,183,237,0.06)}
+.quiz-opt.correct{border-color:var(--success);background:rgba(46,204,113,0.12);color:var(--success)}
+.quiz-opt.wrong{border-color:var(--danger);background:rgba(231,76,60,0.12);color:var(--danger)}
+.quiz-opt.disabled{cursor:default;opacity:.6}
+.quiz-opt.disabled.correct{opacity:1}
+.quiz-feedback{margin-top:16px;padding:12px;border-radius:var(--radius-sm);font-size:.9rem;display:none}
+.quiz-feedback.show{display:block;animation:fadeInUp .3s ease}
+.quiz-feedback.correct-fb{background:rgba(46,204,113,0.1);color:var(--success);border:1px solid rgba(46,204,113,0.2)}
+.quiz-feedback.wrong-fb{background:rgba(231,76,60,0.1);color:var(--danger);border:1px solid rgba(231,76,60,0.2)}
+.quiz-next{margin-top:16px;padding:10px 28px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:.9rem;font-weight:600;transition:var(--transition);display:none}
+.quiz-next.show{display:inline-block}
+.quiz-next:hover{background:var(--accent-light)}
+.quiz-result{text-align:center;display:none}
+.quiz-result h2{color:var(--accent);margin-bottom:8px}
+.quiz-result p{color:var(--text-secondary);font-size:1.1rem}
+.quiz-retry{margin-top:16px;padding:10px 28px;border-radius:var(--radius-sm);background:transparent;color:var(--accent);border:1px solid var(--accent);cursor:pointer;font-size:.9rem;transition:var(--transition)}
+.quiz-retry:hover{background:var(--accent);color:#fff}
+
+/* ============================================================
+   SLIDE 13 — DOCKERFILE BUILDER
+   ============================================================ */
+.dockerfile-builder{max-width:750px;width:100%;background:var(--bg-card);border-radius:var(--radius);border:1px solid rgba(255,255,255,0.06);overflow:hidden}
+.df-header{display:flex;align-items:center;gap:8px;padding:12px 20px;background:var(--bg-secondary);border-bottom:1px solid rgba(255,255,255,0.04)}
+.df-dot{width:12px;height:12px;border-radius:50%}
+.df-dot.red{background:#ff5f56}
+.df-dot.yellow{background:#ffbd2e}
+.df-dot.green{background:#27c93f}
+.df-title{margin-left:12px;font-size:.8rem;color:var(--text-secondary)}
+.df-body{padding:24px;font-family:'Courier New',monospace;font-size:.9rem;line-height:1.9;min-height:300px}
+.df-line{opacity:0;transform:translateX(-10px);transition:all .4s ease;display:flex;gap:12px;align-items:flex-start}
+.df-line.visible{opacity:1;transform:translateX(0)}
+.df-line .line-num{color:var(--text-secondary);opacity:.4;user-select:none;min-width:24px;text-align:right;font-size:.8rem}
+.df-line .kw{color:#c678dd;font-weight:600}
+.df-line .str{color:#98c379}
+.df-line .cmd{color:#e5c07b}
+.df-line .arg{color:#d19a66}
+.df-line .comment{color:var(--text-secondary);font-style:italic;opacity:.6}
+.df-annotation{margin-left:40px;padding:6px 14px;background:rgba(13,183,237,0.08);border-left:2px solid var(--accent);color:var(--text-secondary);font-size:.78rem;font-family:'Segoe UI',system-ui,sans-serif;border-radius:0 6px 6px 0;opacity:0;transform:translateX(-10px);transition:all .4s ease .2s;margin-bottom:4px}
+.df-annotation.visible{opacity:1;transform:translateX(0)}
+
+/* ============================================================
+   SLIDE 14 — BEST PRACTICES FLIP CARDS
+   ============================================================ */
+.bp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;max-width:900px;width:100%}
+.flip-card{perspective:1000px;height:180px;cursor:pointer}
+.flip-inner{position:relative;width:100%;height:100%;transition:transform .6s ease;transform-style:preserve-3d}
+.flip-card:hover .flip-inner,.flip-card.flipped .flip-inner{transform:rotateY(180deg)}
+.flip-front,.flip-back{position:absolute;inset:0;backface-visibility:hidden;border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:1px solid rgba(255,255,255,0.06)}
+.flip-front{background:var(--bg-card)}
+.flip-front h4{color:var(--accent);margin-bottom:6px;font-size:.95rem}
+.flip-front p{color:var(--text-secondary);font-size:.78rem}
+.flip-front .flip-icon{font-size:2rem;margin-bottom:10px}
+.flip-back{background:var(--bg-card-hover);transform:rotateY(180deg);border-color:rgba(13,183,237,0.15)}
+.flip-back .do-label{color:var(--success);font-weight:600;font-size:.85rem;margin-bottom:6px}
+.flip-back .dont-label{color:var(--danger);font-weight:600;font-size:.85rem;margin-bottom:6px}
+.flip-back p{color:var(--text-secondary);font-size:.82rem;line-height:1.5}
+
+/* ============================================================
+   SLIDE 15 — SECURITY
+   ============================================================ */
+.security-layout{display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:950px;width:100%}
+.sec-checklist{background:var(--bg-card);border-radius:var(--radius);padding:28px;border:1px solid rgba(255,255,255,0.06)}
+.sec-checklist h3{color:var(--accent);margin-bottom:16px}
+.sec-item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);opacity:0;transform:translateX(-15px);transition:all .4s ease}
+.sec-item.visible{opacity:1;transform:translateX(0)}
+.sec-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--text-secondary);display:flex;align-items:center;justify-content:center;font-size:.7rem;transition:var(--transition);flex-shrink:0}
+.sec-item.checked .sec-check{border-color:var(--success);background:var(--success);color:#fff}
+.sec-item p{font-size:.85rem;color:var(--text-secondary)}
+.sec-item.checked p{color:var(--text-primary)}
+.sec-attack-surface{background:var(--bg-card);border-radius:var(--radius);padding:28px;border:1px solid rgba(255,255,255,0.06)}
+.sec-attack-surface h3{color:var(--accent);margin-bottom:16px}
+.attack-layer{padding:10px 16px;margin-bottom:8px;border-radius:var(--radius-sm);font-size:.82rem;display:flex;justify-content:space-between;align-items:center;transition:var(--transition)}
+.attack-layer .risk{font-size:.7rem;padding:2px 8px;border-radius:10px;font-weight:600}
+.risk-high{background:rgba(231,76,60,0.15);color:var(--danger)}
+.risk-med{background:rgba(243,156,18,0.15);color:var(--warning)}
+.risk-low{background:rgba(46,204,113,0.15);color:var(--success)}
+.attack-layer.al-1{background:rgba(231,76,60,0.06);color:var(--text-primary)}
+.attack-layer.al-2{background:rgba(243,156,18,0.06);color:var(--text-primary)}
+.attack-layer.al-3{background:rgba(46,204,113,0.06);color:var(--text-primary)}
+
+/* ============================================================
+   SLIDE 16 — THANK YOU
+   ============================================================ */
+.thankyou-content{text-align:center}
+.thankyou-whale{position:relative;width:200px;height:150px;margin:0 auto 24px}
+.wave-whale{animation:float 3s ease-in-out infinite}
+.social-links{display:flex;gap:16px;justify-content:center;margin-top:24px}
+.social-link{padding:10px 24px;border-radius:var(--radius);background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);color:var(--text-secondary);text-decoration:none;transition:var(--transition);font-size:.9rem}
+.social-link:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px)}
+#confetti-canvas{position:fixed;inset:0;pointer-events:none;z-index:9999}
+
+/* ============================================================
+   FULLSCREEN BUTTON
+   ============================================================ */
+#fullscreen-btn{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:999;background:var(--bg-card);border:1px solid rgba(255,255,255,0.06);color:var(--text-secondary);padding:7px 16px;border-radius:20px;cursor:pointer;font-size:.8rem;font-family:inherit;display:flex;align-items:center;gap:6px;transition:var(--transition)}
+#fullscreen-btn:hover{border-color:var(--accent);color:var(--accent)}
+#fullscreen-btn svg{width:14px;height:14px;fill:currentColor}
+
+/* ============================================================
+   KEYBOARD HINT
+   ============================================================ */
+#keyboard-hint{position:fixed;bottom:24px;left:24px;z-index:999;font-size:.75rem;color:var(--text-secondary);opacity:.5;transition:opacity 1s}
+#keyboard-hint kbd{display:inline-block;padding:2px 7px;border-radius:4px;background:var(--bg-card);border:1px solid rgba(255,255,255,0.1);font-family:inherit;font-size:.7rem;margin:0 2px}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media(max-width:768px){
+  .slide{padding:40px 24px}
+  h1{font-size:2rem}
+  h2{font-size:1.5rem}
+  .comparison{flex-direction:column;gap:24px;align-items:center}
+  .vs-badge{margin-bottom:0}
+  .concepts-grid,.interactive-panel,.security-layout{grid-template-columns:1fr}
+  .arch-layout{flex-direction:column}
+  .timeline-entry{flex-direction:column !important;text-align:left !important}
+  .timeline-entry:nth-child(odd) .timeline-content{padding-right:0;padding-left:24px}
+  .timeline::before{left:20px}
+  .timeline-year{width:auto;text-align:left;padding-left:30px}
+  #nav-dots{right:8px}
+  .nav-dot{width:8px;height:8px}
+}
+</style>
+</head>
+<body>
+
+<!-- PROGRESS BAR -->
+<div id="progress-bar"></div>
+
+<!-- NAVIGATION DOTS -->
+<nav id="nav-dots"></nav>
+
+<!-- SLIDE COUNTER -->
+<div id="slide-counter"><span id="current-num">1</span> / <span id="total-num">16</span></div>
+
+<!-- FULLSCREEN BUTTON -->
+<button id="fullscreen-btn" onclick="toggleFullscreen()" title="Toggle fullscreen (F)">
+  <svg viewBox="0 0 24 24" id="fs-icon-enter"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+  <svg viewBox="0 0 24 24" id="fs-icon-exit" style="display:none"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+  <span id="fs-label">Fullscreen</span>
+</button>
+
+<!-- KEYBOARD HINT -->
+<div id="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> or <kbd>↑</kbd><kbd>↓</kbd> to navigate &nbsp; <kbd>F</kbd> fullscreen</div>
+
+<!-- ============================================================
+     SLIDE 1 — Docker Intro
+     ============================================================ -->
+<section class="slide" id="slide-1" data-title="Docker Intro">
+  <span class="slide-number">01 / 16</span>
+  <div class="whale-container anim-target">
+    <img src="https://www.docker.com/wp-content/uploads/2022/03/Moby-logo.png" alt="Docker Moby whale logo" width="300" style="object-fit:contain">
+  </div>
+  <h1 class="anim-target">What is <span class="accent">Docker</span>?</h1>
+  <div class="anim-target" style="overflow:hidden">
+    <span class="typing-text">An open platform for developing, shipping, and running applications</span>
+  </div>
+  <div class="intro-badges anim-target">
+    <span class="tag">Containers</span>
+    <span class="tag">Lightweight</span>
+    <span class="tag">Portable</span>
+    <span class="tag">Fast</span>
+    <span class="tag">Consistent</span>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 2 — History
+     ============================================================ -->
+<section class="slide" id="slide-2" data-title="History">
+  <span class="slide-number">02 / 16</span>
+  <h2 class="anim-target">Docker <span class="accent">Timeline</span></h2>
+  <p class="subtitle anim-target">From dotCloud to the container revolution</p>
+  <div class="timeline">
+    <div class="timeline-entry">
+      <div class="timeline-year">2008</div>
+      <div class="timeline-content"><h3>dotCloud Founded</h3><p>Solomon Hykes founds dotCloud, a PaaS company — Docker's predecessor.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2013</div>
+      <div class="timeline-content"><h3>Docker Open-Sourced</h3><p>Docker is released as open-source at PyCon. The container revolution begins.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2014</div>
+      <div class="timeline-content"><h3>Docker Hub & 1.0</h3><p>Docker Hub launches. Docker 1.0 released — declared production-ready.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2015</div>
+      <div class="timeline-content"><h3>OCI Founded</h3><p>Open Container Initiative established. Docker Compose and Docker Swarm released.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2016</div>
+      <div class="timeline-content"><h3>containerd Donated</h3><p>Docker donates containerd to the CNCF. Swarm mode built into Docker Engine.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2017</div>
+      <div class="timeline-content"><h3>Moby Project</h3><p>Docker open-sources its platform as the Moby Project. Multi-stage builds arrive.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2020</div>
+      <div class="timeline-content"><h3>Docker Desktop Changes</h3><p>Kubernetes becomes Kubernetes. Docker Desktop adopts a new subscription model.</p></div>
+    </div>
+    <div class="timeline-entry">
+      <div class="timeline-year">2024</div>
+      <div class="timeline-content"><h3>Docker Today</h3><p>20M+ developers, 300B+ image pulls. Docker Build Cloud and AI integrations.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 3 — Docker vs VM
+     ============================================================ -->
+<section class="slide" id="slide-3" data-title="Docker vs VM">
+  <span class="slide-number">03 / 16</span>
+  <h2 class="anim-target">Containers vs <span class="accent">Virtual Machines</span></h2>
+  <p class="subtitle anim-target">Shared kernel vs full OS isolation</p>
+  <div class="comparison anim-target">
+    <div class="comparison-col">
+      <h3>🐳 Containers</h3>
+      <div class="stack">
+        <div class="stack-layer l-app">App A &nbsp;|&nbsp; App B &nbsp;|&nbsp; App C</div>
+        <div class="stack-layer l-bins">Bins / Libs</div>
+        <div class="stack-layer l-engine">Docker Engine</div>
+        <div class="stack-layer l-hostos">Host Operating System</div>
+        <div class="stack-layer l-hardware">Infrastructure</div>
+      </div>
+    </div>
+    <span class="vs-badge">VS</span>
+    <div class="comparison-col">
+      <h3>🖥️ Virtual Machines</h3>
+      <div class="stack">
+        <div class="stack-layer l-app">App A &nbsp;|&nbsp; App B</div>
+        <div class="stack-layer l-bins">Bins / Libs</div>
+        <div class="stack-layer l-guestos">Guest OS (each VM)</div>
+        <div class="stack-layer l-hypervisor">Hypervisor</div>
+        <div class="stack-layer l-hardware">Infrastructure</div>
+      </div>
+    </div>
+  </div>
+  <div class="comparison-summary anim-target">
+    <div class="card"><h4>Boot Time</h4><p>Containers: ~seconds<br>VMs: ~minutes</p></div>
+    <div class="card"><h4>Size</h4><p>Containers: MBs<br>VMs: GBs</p></div>
+    <div class="card"><h4>Isolation</h4><p>Containers: Process-level<br>VMs: Hardware-level</p></div>
+    <div class="card"><h4>Overhead</h4><p>Containers: Minimal<br>VMs: Significant</p></div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 4 — Cgroups & Namespaces
+     ============================================================ -->
+<section class="slide" id="slide-4" data-title="Cgroups & Namespaces">
+  <span class="slide-number">04 / 16</span>
+  <h2 class="anim-target">Linux <span class="accent">Cgroups</span> & <span class="accent">Namespaces</span></h2>
+  <p class="subtitle anim-target">The two pillars that make containers possible</p>
+  <div class="concepts-grid anim-target">
+    <div class="concept-card card">
+      <span class="concept-icon">⚙️</span>
+      <h3>Control Groups (cgroups)</h3>
+      <p>Limit, account for, and isolate the resource usage (CPU, memory, disk I/O, network) of process groups.</p>
+      <div class="concept-items" style="margin-top:16px">
+        <span class="tag">CPU</span>
+        <span class="tag">Memory</span>
+        <span class="tag">Block I/O</span>
+        <span class="tag">Network</span>
+        <span class="tag">Devices</span>
+      </div>
+    </div>
+    <div class="concept-card card">
+      <span class="concept-icon">🔒</span>
+      <h3>Namespaces</h3>
+      <p>Partition kernel resources so each set of processes sees its own isolated instance of the global resource.</p>
+      <div class="concept-items" style="margin-top:16px">
+        <span class="tag">PID</span>
+        <span class="tag">NET</span>
+        <span class="tag">MNT</span>
+        <span class="tag">UTS</span>
+        <span class="tag">IPC</span>
+        <span class="tag">USER</span>
+        <span class="tag">CGROUP</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 5 — Cgroups & Namespaces Interactive
+     ============================================================ -->
+<section class="slide" id="slide-5" data-title="Interactive Demo">
+  <span class="slide-number">05 / 16</span>
+  <h2 class="anim-target">Interactive <span class="accent">Sandbox</span></h2>
+  <p class="subtitle anim-target">Simulate cgroup limits and namespace isolation</p>
+  <div class="interactive-panel anim-target">
+    <div class="ctrl-section">
+      <h3>⚙️ Cgroup Limits</h3>
+      <div class="slider-group">
+        <label>CPU Limit <span id="cpu-val">50%</span></label>
+        <input type="range" id="cpu-slider" min="0" max="100" value="50">
+      </div>
+      <div class="slider-group">
+        <label>Memory Limit <span id="mem-val">256 MB</span></label>
+        <input type="range" id="mem-slider" min="32" max="512" value="256" step="16">
+      </div>
+      <div class="slider-group">
+        <label>I/O Bandwidth <span id="io-val">50 MB/s</span></label>
+        <input type="range" id="io-slider" min="1" max="100" value="50">
+      </div>
+      <div class="process-viz">
+        <div class="viz-label">CPU Usage</div>
+        <div class="viz-bar" id="cpu-bar" style="width:50%;background:var(--accent)"></div>
+        <div class="viz-label">Memory Usage</div>
+        <div class="viz-bar" id="mem-bar" style="width:50%;background:var(--success)"></div>
+        <div class="viz-label">I/O Throughput</div>
+        <div class="viz-bar" id="io-bar" style="width:50%;background:var(--warning)"></div>
+      </div>
+    </div>
+    <div class="ctrl-section">
+      <h3>🔒 Namespace Isolation</h3>
+      <p style="color:var(--text-secondary);font-size:.82rem;margin-bottom:14px">Toggle namespaces to see what the process can access:</p>
+      <div class="ns-toggles">
+        <button class="ns-btn on" data-ns="PID" onclick="toggleNs(this)">PID</button>
+        <button class="ns-btn on" data-ns="NET" onclick="toggleNs(this)">NET</button>
+        <button class="ns-btn on" data-ns="MNT" onclick="toggleNs(this)">MNT</button>
+        <button class="ns-btn on" data-ns="UTS" onclick="toggleNs(this)">UTS</button>
+        <button class="ns-btn on" data-ns="IPC" onclick="toggleNs(this)">IPC</button>
+        <button class="ns-btn on" data-ns="USER" onclick="toggleNs(this)">USER</button>
+      </div>
+      <div class="process-viz" id="ns-viz" style="margin-top:16px;line-height:1.8">
+        <div>$ <span style="color:var(--accent)">ps aux</span> → <span id="ns-pid">PID 1 (isolated)</span></div>
+        <div>$ <span style="color:var(--accent)">ip addr</span> → <span id="ns-net">eth0: 172.17.0.2 (container network)</span></div>
+        <div>$ <span style="color:var(--accent)">ls /</span> → <span id="ns-mnt">/app /bin /etc (container rootfs)</span></div>
+        <div>$ <span style="color:var(--accent)">hostname</span> → <span id="ns-uts">container-abc123</span></div>
+        <div>$ <span style="color:var(--accent)">ipcs</span> → <span id="ns-ipc">No shared segments (isolated)</span></div>
+        <div>$ <span style="color:var(--accent)">whoami</span> → <span id="ns-user">root (mapped to uid 1000)</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 6 — Architecture of Docker
+     ============================================================ -->
+<section class="slide" id="slide-6" data-title="Architecture">
+  <span class="slide-number">06 / 16</span>
+  <h2 class="anim-target">Docker <span class="accent">Architecture</span></h2>
+  <div class="arch-layout anim-target">
+    <div class="arch-diagram">
+      <svg class="arch-svg" viewBox="0 0 600 380" id="arch-svg-main">
+        <!-- Docker CLI -->
+        <g class="component" data-comp="cli" onclick="showArchDetail('cli')">
+          <rect x="220" y="10" width="160" height="50" rx="10" fill="#1a2332" stroke="#0db7ed" stroke-width="1.5"/>
+          <text x="300" y="40" text-anchor="middle" font-weight="600" font-size="14">Docker CLI</text>
+        </g>
+        <!-- Arrow CLI → dockerd -->
+        <line class="arrow" id="arr-cli-dockerd" x1="300" y1="60" x2="300" y2="100" marker-end="url(#arrowhead)"/>
+        <!-- dockerd -->
+        <g class="component" data-comp="dockerd" onclick="showArchDetail('dockerd')">
+          <rect x="180" y="100" width="240" height="55" rx="10" fill="#1a2332" stroke="#0db7ed" stroke-width="1.5"/>
+          <text x="300" y="122" text-anchor="middle" font-weight="600" font-size="14">dockerd</text>
+          <text x="300" y="140" text-anchor="middle" font-size="10" fill="#8892a4">Docker Daemon (REST API)</text>
+        </g>
+        <!-- Arrow dockerd → containerd -->
+        <line class="arrow" id="arr-dockerd-containerd" x1="300" y1="155" x2="300" y2="195" marker-end="url(#arrowhead)"/>
+        <!-- containerd -->
+        <g class="component" data-comp="containerd" onclick="showArchDetail('containerd')">
+          <rect x="180" y="195" width="240" height="55" rx="10" fill="#1a2332" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="300" y="217" text-anchor="middle" font-weight="600" font-size="14" fill="#d4a5ff">containerd</text>
+          <text x="300" y="235" text-anchor="middle" font-size="10" fill="#8892a4">Container Lifecycle Manager</text>
+        </g>
+        <!-- Arrow containerd → shim -->
+        <line class="arrow" id="arr-containerd-shim" x1="300" y1="250" x2="300" y2="290" marker-end="url(#arrowhead)"/>
+        <!-- containerd-shim -->
+        <g class="component" data-comp="shim" onclick="showArchDetail('shim')">
+          <rect x="190" y="290" width="100" height="45" rx="8" fill="#1a2332" stroke="#f39c12" stroke-width="1.5"/>
+          <text x="240" y="317" text-anchor="middle" font-weight="600" font-size="12" fill="#f39c12">shim</text>
+        </g>
+        <!-- runc -->
+        <g class="component" data-comp="runc" onclick="showArchDetail('runc')">
+          <rect x="310" y="290" width="100" height="45" rx="8" fill="#1a2332" stroke="#2ecc71" stroke-width="1.5"/>
+          <text x="360" y="317" text-anchor="middle" font-weight="600" font-size="12" fill="#2ecc71">runc</text>
+        </g>
+        <!-- Arrow shim → runc -->
+        <line class="arrow" id="arr-shim-runc" x1="290" y1="312" x2="310" y2="312" marker-end="url(#arrowhead)"/>
+        <!-- Container -->
+        <g class="component" data-comp="container">
+          <rect x="220" y="350" width="160" height="30" rx="6" fill="rgba(13,183,237,0.1)" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4"/>
+          <text x="300" y="369" text-anchor="middle" font-size="11" fill="#0db7ed">Container Process</text>
+        </g>
+        <line class="arrow" id="arr-runc-container" x1="360" y1="335" x2="340" y2="350" marker-end="url(#arrowhead)"/>
+        <!-- Images / Registry side (containerd pulls images) -->
+        <g class="component" data-comp="registry" onclick="showArchDetail('registry')">
+          <rect x="460" y="195" width="120" height="45" rx="8" fill="#1a2332" stroke="#8892a4" stroke-width="1"/>
+          <text x="520" y="222" text-anchor="middle" font-size="12" fill="#8892a4">Registry</text>
+        </g>
+        <line class="arrow" x1="420" y1="222" x2="460" y2="222" stroke-dasharray="4" marker-end="url(#arrowhead)"/>
+        <line class="arrow" x1="460" y1="215" x2="420" y2="215" stroke-dasharray="4" marker-end="url(#arrowhead)"/>
+        <!-- Arrowhead marker -->
+        <defs>
+          <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#8892a4"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="arch-panel" id="arch-detail">
+      <h3>🏗️ Click a component</h3>
+      <p>Click on any component in the diagram to learn what it does and how it fits in the Docker architecture.</p>
+      <div style="margin-top:20px;padding:16px;background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04)">
+        <h4 style="font-size:.85rem;color:var(--warning);margin-bottom:6px">📮 Postal Analogy</h4>
+        <p style="font-size:.82rem;color:var(--text-secondary)">Think of Docker like a postal system:<br><br>
+        <strong style="color:var(--accent)">CLI</strong> = You writing a letter<br>
+        <strong style="color:var(--accent)">dockerd</strong> = The post office<br>
+        <strong style="color:var(--accent)">containerd</strong> = The sorting facility<br>
+        <strong style="color:var(--accent)">shim</strong> = The delivery truck<br>
+        <strong style="color:var(--accent)">runc</strong> = The mailbox (final delivery)</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 7 — Docker CLI
+     ============================================================ -->
+<section class="slide" id="slide-7" data-title="Docker CLI">
+  <span class="slide-number">07 / 16</span>
+  <h2 class="anim-target">Docker <span class="accent">CLI</span> Commands</h2>
+  <p class="subtitle anim-target">Your interface to the Docker ecosystem</p>
+  <div class="cmd-grid anim-target">
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker run</code>
+      <p>Create and start a container from an image</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker run -d -p 8080:80 --name web nginx:latest</div>
+    </div>
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker build</code>
+      <p>Build an image from a Dockerfile</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker build -t myapp:v1 .</div>
+    </div>
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker pull</code>
+      <p>Download an image from a registry</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker pull python:3.12-slim</div>
+    </div>
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker ps</code>
+      <p>List running containers</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker ps --format "table {{.Names}}\t{{.Status}}"</div>
+    </div>
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker exec</code>
+      <p>Execute a command in a running container</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker exec -it web /bin/bash</div>
+    </div>
+    <div class="cmd-card" onclick="toggleCmd(this)">
+      <code>docker compose</code>
+      <p>Define and run multi-container applications</p>
+      <div class="cmd-example"><span style="color:var(--text-secondary)">$</span> docker compose up -d --build</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 8 — dockerd
+     ============================================================ -->
+<section class="slide" id="slide-8" data-title="dockerd">
+  <span class="slide-number">08 / 16</span>
+  <h2 class="anim-target">Inside <span class="accent">dockerd</span></h2>
+  <p class="subtitle anim-target">The Docker Daemon — the brain of Docker</p>
+  <div class="flow-container anim-target">
+    <div class="flow-steps" id="dockerd-flow">
+      <div class="flow-step">
+        <div class="step-icon">📨</div>
+        <div class="step-text"><h4>REST API Server</h4><p>Listens on unix:///var/run/docker.sock. Receives requests from the CLI.</p></div>
+      </div>
+      <div class="flow-connector"></div>
+      <div class="flow-step">
+        <div class="step-icon">🖼️</div>
+        <div class="step-text"><h4>Image Management</h4><p>Pull, build, tag, and push images. Manages local image store and layer cache.</p></div>
+      </div>
+      <div class="flow-connector"></div>
+      <div class="flow-step">
+        <div class="step-icon">🌐</div>
+        <div class="step-text"><h4>Network Management</h4><p>Creates bridge, overlay, and macvlan networks. Manages container DNS and IP allocation.</p></div>
+      </div>
+      <div class="flow-connector"></div>
+      <div class="flow-step">
+        <div class="step-icon">💾</div>
+        <div class="step-text"><h4>Volume Management</h4><p>Creates and mounts volumes. Supports local, NFS, and plugin-based drivers.</p></div>
+      </div>
+      <div class="flow-connector"></div>
+      <div class="flow-step">
+        <div class="step-icon">📦</div>
+        <div class="step-text"><h4>Delegates to containerd</h4><p>Sends gRPC calls to containerd for actual container lifecycle management.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 9 — containerd & shim
+     ============================================================ -->
+<section class="slide" id="slide-9" data-title="containerd & shim">
+  <span class="slide-number">09 / 16</span>
+  <h2 class="anim-target"><span class="accent">containerd</span> & shim</h2>
+  <p class="subtitle anim-target">Container lifecycle management and process isolation</p>
+  <div class="lifecycle-container anim-target">
+    <div class="lifecycle-track" id="lifecycle-track">
+      <div class="lc-node" data-stage="create" onclick="showLifecycle(this)"><h4>Create</h4><p>Prepare bundle</p></div>
+      <span class="lc-arrow">→</span>
+      <div class="lc-node" data-stage="start" onclick="showLifecycle(this)"><h4>Start</h4><p>Launch process</p></div>
+      <span class="lc-arrow">→</span>
+      <div class="lc-node" data-stage="running" onclick="showLifecycle(this)"><h4>Running</h4><p>Active workload</p></div>
+      <span class="lc-arrow">→</span>
+      <div class="lc-node" data-stage="pause" onclick="showLifecycle(this)"><h4>Pause</h4><p>Freeze process</p></div>
+      <span class="lc-arrow">→</span>
+      <div class="lc-node" data-stage="stop" onclick="showLifecycle(this)"><h4>Stop</h4><p>SIGTERM → SIGKILL</p></div>
+      <span class="lc-arrow">→</span>
+      <div class="lc-node" data-stage="delete" onclick="showLifecycle(this)"><h4>Delete</h4><p>Clean up</p></div>
+    </div>
+    <div class="shim-visual">
+      <div class="shim-box card">
+        <h4>🛡️ containerd-shim</h4>
+        <p>Acts as the parent process of the container. Allows dockerd/containerd to restart without killing running containers.</p>
+      </div>
+      <div class="shim-box card">
+        <h4>📋 Responsibilities</h4>
+        <p>Keeps STDIO open, reports exit status, allows daemonless containers. One shim per container.</p>
+      </div>
+      <div class="shim-box card">
+        <h4>🔄 Decoupling</h4>
+        <p>Docker daemon can be upgraded/restarted without disrupting running workloads.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 10 — runc & Runtimes
+     ============================================================ -->
+<section class="slide" id="slide-10" data-title="runc & Runtimes">
+  <span class="slide-number">10 / 16</span>
+  <h2 class="anim-target"><span class="accent">runc</span> & OCI Runtimes</h2>
+  <p class="subtitle anim-target">The low-level container runtimes that create processes</p>
+  <div class="runtime-cards anim-target">
+    <div class="runtime-card">
+      <h4>runc</h4>
+      <p>The reference OCI runtime. Spawns containers using Linux namespaces and cgroups directly.</p>
+      <span class="rt-badge rt-default">Default · Go</span>
+    </div>
+    <div class="runtime-card">
+      <h4>crun</h4>
+      <p>Written in C for faster startup. OCI-compliant, drop-in replacement for runc.</p>
+      <span class="rt-badge rt-fast">Fast · C</span>
+    </div>
+    <div class="runtime-card">
+      <h4>Kata Containers</h4>
+      <p>Runs containers in lightweight VMs. Combines the security of VMs with container speed.</p>
+      <span class="rt-badge rt-secure">Secure · VMs</span>
+    </div>
+    <div class="runtime-card">
+      <h4>gVisor (runsc)</h4>
+      <p>Google's application kernel. Intercepts syscalls for an extra isolation layer.</p>
+      <span class="rt-badge rt-secure">Secure · Sandbox</span>
+    </div>
+  </div>
+  <div class="card anim-target" style="max-width:700px;width:100%;margin-top:24px;text-align:center;padding:20px">
+    <p style="color:var(--text-secondary);font-size:.9rem">All runtimes implement the <strong style="color:var(--accent)">OCI Runtime Specification</strong> — a standard interface for creating and running containers, ensuring interoperability.</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 11 — Architecture Revisited
+     ============================================================ -->
+<section class="slide" id="slide-11" data-title="Architecture Replay">
+  <span class="slide-number">11 / 16</span>
+  <h2 class="anim-target">Architecture <span class="accent">in Action</span></h2>
+  <p class="subtitle anim-target">Watch a <code style="color:var(--accent)">docker run</code> trace flow through the system</p>
+  <div class="arch-layout anim-target">
+    <div class="arch-diagram">
+      <svg class="arch-svg" viewBox="0 0 600 380" id="arch-svg-replay">
+        <g class="component" data-comp="cli" id="r-cli">
+          <rect x="220" y="10" width="160" height="50" rx="10" fill="#1a2332" stroke="#0db7ed" stroke-width="1.5"/>
+          <text x="300" y="40" text-anchor="middle" font-weight="600" font-size="14">Docker CLI</text>
+        </g>
+        <line class="arrow" id="r-arr1" x1="300" y1="60" x2="300" y2="100" marker-end="url(#arrowhead2)"/>
+        <g class="component" data-comp="dockerd" id="r-dockerd">
+          <rect x="180" y="100" width="240" height="55" rx="10" fill="#1a2332" stroke="#0db7ed" stroke-width="1.5"/>
+          <text x="300" y="122" text-anchor="middle" font-weight="600" font-size="14">dockerd</text>
+          <text x="300" y="140" text-anchor="middle" font-size="10" fill="#8892a4">Docker Daemon</text>
+        </g>
+        <line class="arrow" id="r-arr2" x1="300" y1="155" x2="300" y2="195" marker-end="url(#arrowhead2)"/>
+        <g class="component" data-comp="containerd" id="r-containerd">
+          <rect x="180" y="195" width="240" height="55" rx="10" fill="#1a2332" stroke="#9b59b6" stroke-width="1.5"/>
+          <text x="300" y="217" text-anchor="middle" font-weight="600" font-size="14" fill="#d4a5ff">containerd</text>
+          <text x="300" y="235" text-anchor="middle" font-size="10" fill="#8892a4">Container Lifecycle</text>
+        </g>
+        <line class="arrow" id="r-arr3" x1="300" y1="250" x2="300" y2="290" marker-end="url(#arrowhead2)"/>
+        <g class="component" id="r-shim">
+          <rect x="190" y="290" width="100" height="45" rx="8" fill="#1a2332" stroke="#f39c12" stroke-width="1.5"/>
+          <text x="240" y="317" text-anchor="middle" font-weight="600" font-size="12" fill="#f39c12">shim</text>
+        </g>
+        <g class="component" id="r-runc">
+          <rect x="310" y="290" width="100" height="45" rx="8" fill="#1a2332" stroke="#2ecc71" stroke-width="1.5"/>
+          <text x="360" y="317" text-anchor="middle" font-weight="600" font-size="12" fill="#2ecc71">runc</text>
+        </g>
+        <line class="arrow" id="r-arr4" x1="290" y1="312" x2="310" y2="312" marker-end="url(#arrowhead2)"/>
+        <g class="component" id="r-container">
+          <rect x="220" y="350" width="160" height="30" rx="6" fill="rgba(13,183,237,0.1)" stroke="var(--accent)" stroke-width="1" stroke-dasharray="4"/>
+          <text x="300" y="369" text-anchor="middle" font-size="11" fill="#0db7ed">Container Process</text>
+        </g>
+        <line class="arrow" id="r-arr5" x1="360" y1="335" x2="340" y2="350" marker-end="url(#arrowhead2)"/>
+        <defs>
+          <marker id="arrowhead2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#8892a4"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+    <div class="arch-panel" id="replay-panel">
+      <h3>▶️ docker run nginx</h3>
+      <p id="replay-text">Press <strong>Play</strong> to trace the request flow through Docker's architecture.</p>
+      <button onclick="startReplay()" id="replay-btn" style="margin-top:16px;padding:10px 24px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;font-size:.9rem;transition:var(--transition)">▶ Play Animation</button>
+      <div id="replay-steps" style="margin-top:16px;font-size:.82rem;color:var(--text-secondary);line-height:1.8"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 12 — Quiz
+     ============================================================ -->
+<section class="slide" id="slide-12" data-title="Quiz">
+  <span class="slide-number">12 / 16</span>
+  <h2 class="anim-target">Docker <span class="accent">Quiz</span></h2>
+  <div class="quiz-container anim-target">
+    <div class="quiz-header">
+      <span class="quiz-score">Score: <span id="quiz-score">0</span>/5</span>
+      <span class="quiz-progress">Question <span id="quiz-current">1</span>/5</span>
+    </div>
+    <div class="quiz-question" id="quiz-area"></div>
+    <div class="quiz-feedback" id="quiz-feedback"></div>
+    <button class="quiz-next" id="quiz-next" onclick="nextQuestion()">Next Question →</button>
+    <div class="quiz-result" id="quiz-result">
+      <h2 id="result-title">🎉 Great Job!</h2>
+      <p id="result-text"></p>
+      <button class="quiz-retry" onclick="resetQuiz()">Try Again</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 13 — Dockerfile Builder
+     ============================================================ -->
+<section class="slide" id="slide-13" data-title="Dockerfile">
+  <span class="slide-number">13 / 16</span>
+  <h2 class="anim-target">Writing a <span class="accent">Dockerfile</span></h2>
+  <p class="subtitle anim-target">Build your image instruction by instruction</p>
+  <div class="dockerfile-builder anim-target">
+    <div class="df-header">
+      <div class="df-dot red"></div>
+      <div class="df-dot yellow"></div>
+      <div class="df-dot green"></div>
+      <span class="df-title">Dockerfile</span>
+    </div>
+    <div class="df-body" id="df-body">
+      <div class="df-line" data-line="1"><span class="line-num">1</span><span><span class="comment"># --- Build stage ---</span></span></div>
+      <div class="df-line" data-line="2"><span class="line-num">2</span><span><span class="kw">FROM</span> <span class="str">golang:1.22-alpine</span> <span class="kw">AS</span> <span class="arg">builder</span></span></div>
+      <div class="df-annotation" data-line="2">Multi-stage build: first stage compiles the Go binary</div>
+      <div class="df-line" data-line="3"><span class="line-num">3</span><span><span class="kw">WORKDIR</span> <span class="arg">/app</span></span></div>
+      <div class="df-annotation" data-line="3">Set the working directory inside the build container</div>
+      <div class="df-line" data-line="4"><span class="line-num">4</span><span><span class="kw">COPY</span> <span class="arg">go.mod</span> <span class="arg">go.sum</span> <span class="arg">./</span></span></div>
+      <div class="df-annotation" data-line="4">Copy module files first to leverage Docker layer caching</div>
+      <div class="df-line" data-line="5"><span class="line-num">5</span><span><span class="kw">RUN</span> <span class="cmd">go mod download</span></span></div>
+      <div class="df-annotation" data-line="5">Download dependencies — cached layer if go.mod hasn't changed</div>
+      <div class="df-line" data-line="6"><span class="line-num">6</span><span><span class="kw">COPY</span> <span class="arg">.</span> <span class="arg">.</span></span></div>
+      <div class="df-annotation" data-line="6">Copy the rest of the application source code</div>
+      <div class="df-line" data-line="7"><span class="line-num">7</span><span><span class="kw">RUN</span> <span class="cmd">CGO_ENABLED=0 go build -o server .</span></span></div>
+      <div class="df-annotation" data-line="7">Compile a static binary — CGO_ENABLED=0 for a fully static build</div>
+      <div class="df-line" data-line="8"><span class="line-num">8</span><span><span class="comment"># --- Runtime stage ---</span></span></div>
+      <div class="df-line" data-line="9"><span class="line-num">9</span><span><span class="kw">FROM</span> <span class="str">alpine:3.19</span></span></div>
+      <div class="df-annotation" data-line="9">Tiny runtime image — no Go toolchain, just the binary</div>
+      <div class="df-line" data-line="10"><span class="line-num">10</span><span><span class="kw">WORKDIR</span> <span class="arg">/app</span></span></div>
+      <div class="df-line" data-line="11"><span class="line-num">11</span><span><span class="kw">COPY</span> <span class="arg">--from=builder</span> <span class="arg">/app/server</span> <span class="arg">.</span></span></div>
+      <div class="df-annotation" data-line="11">Copy only the compiled binary from the build stage</div>
+      <div class="df-line" data-line="12"><span class="line-num">12</span><span><span class="kw">EXPOSE</span> <span class="arg">8080</span></span></div>
+      <div class="df-annotation" data-line="12">Document the port the app listens on (metadata only)</div>
+      <div class="df-line" data-line="13"><span class="line-num">13</span><span><span class="kw">USER</span> <span class="arg">nobody</span></span></div>
+      <div class="df-annotation" data-line="13">Run as non-root user for security</div>
+      <div class="df-line" data-line="14"><span class="line-num">14</span><span><span class="kw">CMD</span> <span class="str">["./server"]</span></span></div>
+      <div class="df-annotation" data-line="14">Run the compiled Go binary when the container starts</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 14 — Dockerfile Best Practices
+     ============================================================ -->
+<section class="slide" id="slide-14" data-title="Best Practices">
+  <span class="slide-number">14 / 16</span>
+  <h2 class="anim-target">Dockerfile <span class="accent">Best Practices</span></h2>
+  <p class="subtitle anim-target">Hover or click cards to reveal the details</p>
+  <div class="bp-grid anim-target">
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">📦</span><h4>Use Multi-Stage Builds</h4><p>Reduce final image size</p></div>
+        <div class="flip-back"><span class="do-label">✅ Do</span><p>Separate build and runtime stages. Copy only artifacts you need into the final image.</p></div>
+      </div>
+    </div>
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">🪶</span><h4>Minimize Layers</h4><p>Combine RUN commands</p></div>
+        <div class="flip-back"><span class="dont-label">❌ Don't</span><p>Don't use separate RUN for each command. Chain with && and use line continuations.</p></div>
+      </div>
+    </div>
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">🏔️</span><h4>Use Alpine/Slim Base</h4><p>Start small, stay small</p></div>
+        <div class="flip-back"><span class="do-label">✅ Do</span><p>Use <code>-alpine</code> or <code>-slim</code> variants. Reduces attack surface and image size dramatically.</p></div>
+      </div>
+    </div>
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">📄</span><h4>Use .dockerignore</h4><p>Exclude unnecessary files</p></div>
+        <div class="flip-back"><span class="do-label">✅ Do</span><p>Add vendor/, .git, *.log, and secrets to .dockerignore to speed up builds and reduce context.</p></div>
+      </div>
+    </div>
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">🔒</span><h4>Don't Run as Root</h4><p>Security first</p></div>
+        <div class="flip-back"><span class="do-label">✅ Do</span><p>Use the USER instruction to switch to a non-root user. Limits damage if the container is compromised.</p></div>
+      </div>
+    </div>
+    <div class="flip-card" onclick="this.classList.toggle('flipped')">
+      <div class="flip-inner">
+        <div class="flip-front"><span class="flip-icon">💎</span><h4>Leverage Build Cache</h4><p>Order matters</p></div>
+        <div class="flip-back"><span class="do-label">✅ Do</span><p>Copy dependency files before source code. Least-changing layers first, most-changing layers last.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 15 — Security
+     ============================================================ -->
+<section class="slide" id="slide-15" data-title="Security">
+  <span class="slide-number">15 / 16</span>
+  <h2 class="anim-target">Container <span class="accent">Security</span></h2>
+  <p class="subtitle anim-target">Reduce your attack surface and harden your containers</p>
+  <div class="security-layout anim-target">
+    <div class="sec-checklist">
+      <h3>✅ Security Checklist</h3>
+      <div class="sec-item" data-idx="0"><div class="sec-check">✓</div><p>Use official and verified base images</p></div>
+      <div class="sec-item" data-idx="1"><div class="sec-check">✓</div><p>Scan images for vulnerabilities (Trivy, Snyk)</p></div>
+      <div class="sec-item" data-idx="2"><div class="sec-check">✓</div><p>Run containers as non-root user</p></div>
+      <div class="sec-item" data-idx="3"><div class="sec-check">✓</div><p>Use read-only filesystems where possible</p></div>
+      <div class="sec-item" data-idx="4"><div class="sec-check">✓</div><p>Drop unnecessary Linux capabilities</p></div>
+      <div class="sec-item" data-idx="5"><div class="sec-check">✓</div><p>Keep images minimal — no shells, no compilers</p></div>
+      <div class="sec-item" data-idx="6"><div class="sec-check">✓</div><p>Use Docker Content Trust for image signing</p></div>
+      <div class="sec-item" data-idx="7"><div class="sec-check">✓</div><p>Never store secrets in images or env vars</p></div>
+    </div>
+    <div class="sec-attack-surface">
+      <h3>🎯 Attack Surface</h3>
+      <div class="attack-layer al-1"><span>Container Escape / Kernel Exploits</span><span class="risk risk-high">HIGH</span></div>
+      <div class="attack-layer al-2"><span>Vulnerable Dependencies</span><span class="risk risk-high">HIGH</span></div>
+      <div class="attack-layer al-2"><span>Misconfigured Privileges</span><span class="risk risk-med">MEDIUM</span></div>
+      <div class="attack-layer al-2"><span>Exposed Ports / Services</span><span class="risk risk-med">MEDIUM</span></div>
+      <div class="attack-layer al-3"><span>Outdated Base Images</span><span class="risk risk-med">MEDIUM</span></div>
+      <div class="attack-layer al-3"><span>Secrets in Image Layers</span><span class="risk risk-high">HIGH</span></div>
+      <div class="attack-layer al-3"><span>Unrestricted Network</span><span class="risk risk-low">LOW</span></div>
+      <div style="margin-top:16px;padding:12px;background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:.8rem;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.04)">
+        💡 <strong style="color:var(--accent)">Defense in Depth:</strong> Combine multiple security measures. No single control is sufficient.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SLIDE 16 — Thank You
+     ============================================================ -->
+<section class="slide" id="slide-16" data-title="Thank You">
+  <span class="slide-number">16 / 16</span>
+  <canvas id="confetti-canvas"></canvas>
+  <div class="thankyou-content anim-target">
+    <div class="thankyou-whale wave-whale">
+      <img src="https://www.docker.com/wp-content/uploads/2022/03/Moby-logo.png" alt="Docker Moby whale logo" width="200" style="object-fit:contain">
+    </div>
+    <h1>Thank <span class="accent">You!</span></h1>
+    <p class="subtitle" style="font-size:1.2rem">Now go build something containerized! 🐳</p>
+    <div class="social-links" style="margin-top:24px">
+      <a class="social-link" href="https://docs.docker.com" target="_blank">📖 Docker Docs</a>
+      <a class="social-link" href="https://hub.docker.com" target="_blank">🐳 Docker Hub</a>
+      <a class="social-link" href="https://github.com/docker" target="_blank">💻 GitHub</a>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ============================================================
+   NAVIGATION & SLIDE MANAGEMENT
+   ============================================================ */
+const slides = document.querySelectorAll('.slide');
+const totalSlides = slides.length;
+let currentSlide = 0;
+let isScrolling = false;
+
+const progressBar = document.getElementById('progress-bar');
+const navDotsContainer = document.getElementById('nav-dots');
+const currentNum = document.getElementById('current-num');
+const totalNum = document.getElementById('total-num');
+
+totalNum.textContent = totalSlides;
+
+slides.forEach((s, i) => {
+  const dot = document.createElement('div');
+  dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+  dot.innerHTML = `<span class="tooltip">${s.dataset.title || 'Slide ' + (i+1)}</span>`;
+  dot.addEventListener('click', () => { isScrolling = false; goToSlide(i); });
+  navDotsContainer.appendChild(dot);
+});
+
+function updateUI() {
+  const dots = document.querySelectorAll('.nav-dot');
+  dots.forEach((d, i) => d.classList.toggle('active', i === currentSlide));
+  progressBar.style.width = ((currentSlide + 1) / totalSlides * 100) + '%';
+  currentNum.textContent = currentSlide + 1;
+  slides.forEach((s, i) => {
+    s.classList.toggle('active', i === currentSlide);
+  });
+  triggerSlideAnimations(currentSlide);
+}
+
+function goToSlide(idx) {
+  if (idx < 0 || idx >= totalSlides || isScrolling) return;
+  isScrolling = true;
+  currentSlide = idx;
+  slides[idx].scrollIntoView({ behavior: 'smooth' });
+  updateUI();
+  setTimeout(() => isScrolling = false, 700);
+}
+
+document.addEventListener('keydown', (e) => {
+  if (typeof hideHint === 'function') hideHint();
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === ' ') {
+    e.preventDefault();
+    goToSlide(currentSlide + 1);
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    goToSlide(currentSlide - 1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    goToSlide(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    goToSlide(totalSlides - 1);
+  } else if (e.key === 'f' || e.key === 'F') {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    toggleFullscreen();
+  }
+});
+
+let wheelCooldown = false;
+window.addEventListener('wheel', (e) => {
+  if (wheelCooldown) return;
+  wheelCooldown = true;
+  setTimeout(() => wheelCooldown = false, 800);
+  if (e.deltaY > 30) goToSlide(currentSlide + 1);
+  else if (e.deltaY < -30) goToSlide(currentSlide - 1);
+}, { passive: true });
+
+let touchStartY = 0;
+window.addEventListener('touchstart', (e) => { touchStartY = e.touches[0].clientY; }, { passive: true });
+window.addEventListener('touchend', (e) => {
+  const dy = touchStartY - e.changedTouches[0].clientY;
+  if (Math.abs(dy) > 50) {
+    if (dy > 0) goToSlide(currentSlide + 1);
+    else goToSlide(currentSlide - 1);
+  }
+}, { passive: true });
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
+      const idx = Array.from(slides).indexOf(entry.target);
+      if (idx !== -1 && idx !== currentSlide) {
+        currentSlide = idx;
+        updateUI();
+      }
+    }
+  });
+}, { threshold: 0.5 });
+
+slides.forEach(s => observer.observe(s));
+
+/* ============================================================
+   SLIDE-SPECIFIC ANIMATIONS
+   ============================================================ */
+const slideAnimated = new Set();
+
+function triggerSlideAnimations(idx) {
+  const first = !slideAnimated.has(idx);
+
+  if (idx === 7 && first) animateDockerdFlow();
+  if (idx === 8 && first) animateLifecycle();
+  if (idx === 12 && first) initDockerfileBuilder();
+  if (idx === 14 && first) animateSecurityChecklist();
+  if (idx === 15) triggerConfetti();
+  if (idx === 11 && first) initQuiz();
+
+  slideAnimated.add(idx);
+}
+
+/* ============================================================
+   SLIDE 5 — CGROUP SLIDERS
+   ============================================================ */
+document.getElementById('cpu-slider').addEventListener('input', function() {
+  document.getElementById('cpu-val').textContent = this.value + '%';
+  document.getElementById('cpu-bar').style.width = this.value + '%';
+  const bar = document.getElementById('cpu-bar');
+  bar.style.background = this.value > 80 ? 'var(--danger)' : this.value > 50 ? 'var(--warning)' : 'var(--accent)';
+});
+document.getElementById('mem-slider').addEventListener('input', function() {
+  document.getElementById('mem-val').textContent = this.value + ' MB';
+  document.getElementById('mem-bar').style.width = (this.value / 512 * 100) + '%';
+  const bar = document.getElementById('mem-bar');
+  bar.style.background = this.value > 400 ? 'var(--danger)' : this.value > 256 ? 'var(--warning)' : 'var(--success)';
+});
+document.getElementById('io-slider').addEventListener('input', function() {
+  document.getElementById('io-val').textContent = this.value + ' MB/s';
+  document.getElementById('io-bar').style.width = this.value + '%';
+  const bar = document.getElementById('io-bar');
+  bar.style.background = this.value > 80 ? 'var(--danger)' : this.value > 50 ? 'var(--warning)' : 'var(--accent-light)';
+});
+
+function toggleNs(btn) {
+  btn.classList.toggle('on');
+  const ns = btn.dataset.ns.toLowerCase();
+  const map = {
+    pid: { on: 'PID 1 (isolated)', off: 'PID 1234, 1235, ... (host PIDs visible!)' },
+    net: { on: 'eth0: 172.17.0.2 (container network)', off: 'eth0: 192.168.1.100, docker0, ... (host network!)' },
+    mnt: { on: '/app /bin /etc (container rootfs)', off: '/ /home /var /usr ... (host filesystem!)' },
+    uts: { on: 'container-abc123', off: 'host-server-prod (host hostname!)' },
+    ipc: { on: 'No shared segments (isolated)', off: '3 shared memory segments (host IPC!)' },
+    user: { on: 'root (mapped to uid 1000)', off: 'root (REAL root - uid 0!)' }
+  };
+  const isOn = btn.classList.contains('on');
+  const el = document.getElementById('ns-' + ns);
+  if (el && map[ns]) {
+    el.textContent = isOn ? map[ns].on : map[ns].off;
+    el.style.color = isOn ? 'var(--success)' : 'var(--danger)';
+  }
+}
+
+/* ============================================================
+   SLIDE 6 — ARCHITECTURE DETAIL
+   ============================================================ */
+const archDetails = {
+  cli: { title: '🖥️ Docker CLI', text: 'The command-line interface that users interact with. Sends REST API calls to the Docker daemon. Translates human-readable commands into API requests.' },
+  dockerd: { title: '⚙️ dockerd (Docker Daemon)', text: 'The persistent background process that manages Docker objects. Handles image builds, networking, volumes, and delegates container operations to containerd via gRPC.' },
+  containerd: { title: '📦 containerd', text: 'An industry-standard container runtime. Manages the complete container lifecycle — pulling images, creating containers, managing storage, and supervising running containers.' },
+  shim: { title: '🚚 containerd-shim', text: 'A lightweight process that acts as the parent of each container. Allows containerd to exit/restart without killing containers. Reports exit status and keeps stdio open.' },
+  runc: { title: '🔧 runc', text: 'The low-level OCI runtime that actually creates the container process. Sets up namespaces, cgroups, seccomp filters, and capabilities, then execs the container entrypoint.' },
+  registry: { title: '☁️ Registry', text: 'Remote storage for Docker images (e.g., Docker Hub, GitHub Container Registry). containerd pulls image layers from registries and manages the local image store. Push operations are coordinated through dockerd.' }
+};
+
+function showArchDetail(comp) {
+  const detail = archDetails[comp];
+  if (!detail) return;
+  const panel = document.getElementById('arch-detail');
+  panel.innerHTML = `<h3>${detail.title}</h3><p>${detail.text}</p>`;
+  document.querySelectorAll('#arch-svg-main .component').forEach(g => {
+    g.classList.toggle('highlight', g.dataset.comp === comp);
+  });
+}
+
+/* ============================================================
+   SLIDE 7 — CLI COMMAND TOGGLE
+   ============================================================ */
+function toggleCmd(card) {
+  const wasExpanded = card.classList.contains('expanded');
+  card.closest('.cmd-grid').querySelectorAll('.cmd-card').forEach(c => c.classList.remove('expanded'));
+  if (!wasExpanded) card.classList.add('expanded');
+}
+
+/* ============================================================
+   SLIDE 8 — DOCKERD FLOW ANIMATION
+   ============================================================ */
+function animateDockerdFlow() {
+  const steps = document.querySelectorAll('#dockerd-flow .flow-step');
+  steps.forEach((step, i) => {
+    setTimeout(() => {
+      step.classList.add('visible');
+      if (i > 0) steps[i-1].classList.remove('active-step');
+      step.classList.add('active-step');
+    }, i * 400);
+  });
+  setTimeout(() => {
+    steps[steps.length - 1].classList.remove('active-step');
+  }, steps.length * 400 + 500);
+}
+
+/* ============================================================
+   SLIDE 9 — LIFECYCLE NODES
+   ============================================================ */
+function showLifecycle(node) {
+  document.querySelectorAll('#lifecycle-track .lc-node').forEach(n => n.classList.remove('active-node'));
+  node.classList.add('active-node');
+}
+
+function animateLifecycle() {
+  const nodes = document.querySelectorAll('#lifecycle-track .lc-node');
+  nodes.forEach((node, i) => {
+    setTimeout(() => {
+      nodes.forEach(n => n.classList.remove('active-node'));
+      node.classList.add('active-node');
+    }, i * 600);
+  });
+  setTimeout(() => {
+    nodes.forEach(n => n.classList.remove('active-node'));
+  }, nodes.length * 600 + 400);
+}
+
+/* ============================================================
+   SLIDE 11 — ARCHITECTURE REPLAY
+   ============================================================ */
+let replayRunning = false;
+function startReplay() {
+  if (replayRunning) return;
+  replayRunning = true;
+  const btn = document.getElementById('replay-btn');
+  btn.textContent = '⏳ Running...';
+  btn.style.opacity = '.6';
+  const stepsDiv = document.getElementById('replay-steps');
+  stepsDiv.innerHTML = '';
+  const textEl = document.getElementById('replay-text');
+
+  const sequence = [
+    { ids: ['r-cli'], arrows: [], text: '1. User runs: <code>docker run -d nginx</code>', desc: 'CLI parses the command and sends a POST request to dockerd API' },
+    { ids: ['r-cli'], arrows: ['r-arr1'], text: '2. CLI → dockerd (REST API)', desc: 'Request hits the daemon on /var/run/docker.sock' },
+    { ids: ['r-dockerd'], arrows: ['r-arr1'], text: '3. dockerd processes request', desc: 'Pulls image if needed, sets up networking & volumes' },
+    { ids: ['r-dockerd'], arrows: ['r-arr2'], text: '4. dockerd → containerd (gRPC)', desc: 'Delegates container creation to containerd' },
+    { ids: ['r-containerd'], arrows: ['r-arr2', 'r-arr3'], text: '5. containerd creates shim', desc: 'Spawns a containerd-shim process for the new container' },
+    { ids: ['r-shim'], arrows: ['r-arr3', 'r-arr4'], text: '6. shim invokes runc', desc: 'Shim calls runc to set up namespaces and cgroups' },
+    { ids: ['r-runc'], arrows: ['r-arr4', 'r-arr5'], text: '7. runc creates container', desc: 'Sets up the isolated environment and starts the process' },
+    { ids: ['r-container'], arrows: ['r-arr5'], text: '8. Container is running! 🎉', desc: 'nginx is now serving traffic in its isolated namespace' }
+  ];
+
+  function clearHighlights() {
+    document.querySelectorAll('#arch-svg-replay .component').forEach(g => g.classList.remove('highlight'));
+    document.querySelectorAll('#arch-svg-replay .arrow').forEach(a => a.classList.remove('highlight'));
+  }
+
+  let step = 0;
+  function nextStep() {
+    if (step >= sequence.length) {
+      replayRunning = false;
+      btn.textContent = '▶ Play Again';
+      btn.style.opacity = '1';
+      return;
+    }
+    clearHighlights();
+    const s = sequence[step];
+    s.ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('highlight');
+    });
+    s.arrows.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('highlight');
+    });
+    textEl.innerHTML = s.desc;
+    stepsDiv.innerHTML += `<div style="animation:fadeInUp .3s ease">${s.text}</div>`;
+    step++;
+    setTimeout(nextStep, 1500);
+  }
+  nextStep();
+}
+
+/* ============================================================
+   SLIDE 12 — QUIZ
+   ============================================================ */
+const quizData = [
+  {
+    q: 'What kernel feature does Docker use to limit CPU and memory for containers?',
+    opts: ['Namespaces', 'Control Groups (cgroups)', 'SELinux', 'iptables'],
+    correct: 1,
+    explanation: 'cgroups (Control Groups) limit, account for, and isolate resource usage of process groups.'
+  },
+  {
+    q: 'Which component directly creates the container process with namespaces?',
+    opts: ['dockerd', 'containerd', 'runc', 'Docker CLI'],
+    correct: 2,
+    explanation: 'runc is the low-level OCI runtime that sets up namespaces and cgroups, then executes the container process.'
+  },
+  {
+    q: 'What is the main advantage of containerd-shim?',
+    opts: ['Faster networking', 'Allows daemon restart without killing containers', 'Image compression', 'Volume encryption'],
+    correct: 1,
+    explanation: 'The shim acts as the parent process of the container, so containerd/dockerd can restart independently.'
+  },
+  {
+    q: 'Which Dockerfile instruction should come FIRST to best leverage build cache?',
+    opts: ['COPY . .', 'RUN go build -o app .', 'COPY go.mod go.sum ./', 'CMD ["./app"]'],
+    correct: 2,
+    explanation: 'Copy dependency files (go.mod/go.sum) before source code so the download layer is cached when only source changes.'
+  },
+  {
+    q: 'Containers share the _____ with the host, unlike VMs.',
+    opts: ['CPU', 'Kernel', 'Hard Drive', 'Network Card'],
+    correct: 1,
+    explanation: 'Containers share the host kernel, which is why they are lighter and faster to start than VMs.'
+  }
+];
+
+let quizState = { current: 0, score: 0, answered: false };
+
+function initQuiz() {
+  quizState = { current: 0, score: 0, answered: false };
+  document.getElementById('quiz-score').textContent = '0';
+  document.getElementById('quiz-current').textContent = '1';
+  document.getElementById('quiz-result').style.display = 'none';
+  document.getElementById('quiz-next').classList.remove('show');
+  document.getElementById('quiz-feedback').classList.remove('show');
+  renderQuestion();
+}
+
+function renderQuestion() {
+  const q = quizData[quizState.current];
+  const area = document.getElementById('quiz-area');
+  area.innerHTML = `<h3>${q.q}</h3><div class="quiz-options">${
+    q.opts.map((o, i) => `<div class="quiz-opt" data-idx="${i}" onclick="answerQuiz(${i})">${String.fromCharCode(65+i)}. ${o}</div>`).join('')
+  }</div>`;
+  quizState.answered = false;
+  document.getElementById('quiz-feedback').className = 'quiz-feedback';
+  document.getElementById('quiz-feedback').classList.remove('show');
+  document.getElementById('quiz-next').classList.remove('show');
+  document.getElementById('quiz-current').textContent = quizState.current + 1;
+}
+
+function answerQuiz(idx) {
+  if (quizState.answered) return;
+  quizState.answered = true;
+  const q = quizData[quizState.current];
+  const opts = document.querySelectorAll('#quiz-area .quiz-opt');
+  opts.forEach(o => {
+    o.classList.add('disabled');
+    const oi = parseInt(o.dataset.idx);
+    if (oi === q.correct) o.classList.add('correct');
+    if (oi === idx && idx !== q.correct) o.classList.add('wrong');
+  });
+  const fb = document.getElementById('quiz-feedback');
+  if (idx === q.correct) {
+    quizState.score++;
+    document.getElementById('quiz-score').textContent = quizState.score;
+    fb.className = 'quiz-feedback correct-fb show';
+    fb.textContent = '✓ Correct! ' + q.explanation;
+  } else {
+    fb.className = 'quiz-feedback wrong-fb show';
+    fb.textContent = '✗ Incorrect. ' + q.explanation;
+  }
+  const nextBtn = document.getElementById('quiz-next');
+  if (quizState.current < quizData.length - 1) {
+    nextBtn.textContent = 'Next Question →';
+    nextBtn.classList.add('show');
+  } else {
+    nextBtn.textContent = 'See Results →';
+    nextBtn.classList.add('show');
+  }
+}
+
+function nextQuestion() {
+  if (quizState.current < quizData.length - 1) {
+    quizState.current++;
+    renderQuestion();
+  } else {
+    showQuizResults();
+  }
+}
+
+function showQuizResults() {
+  document.getElementById('quiz-area').style.display = 'none';
+  document.getElementById('quiz-feedback').style.display = 'none';
+  document.getElementById('quiz-next').style.display = 'none';
+  const result = document.getElementById('quiz-result');
+  result.style.display = 'block';
+  const pct = quizState.score / quizData.length;
+  const title = document.getElementById('result-title');
+  const text = document.getElementById('result-text');
+  if (pct === 1) { title.textContent = '🎉 Perfect Score!'; }
+  else if (pct >= 0.6) { title.textContent = '👏 Great Job!'; }
+  else { title.textContent = '📚 Keep Learning!'; }
+  text.textContent = `You scored ${quizState.score} out of ${quizData.length}`;
+}
+
+function resetQuiz() {
+  document.getElementById('quiz-area').style.display = '';
+  document.getElementById('quiz-feedback').style.display = '';
+  document.getElementById('quiz-next').style.display = '';
+  initQuiz();
+}
+
+/* ============================================================
+   SLIDE 13 — DOCKERFILE BUILDER ANIMATION
+   ============================================================ */
+function initDockerfileBuilder() {
+  const lines = document.querySelectorAll('#df-body .df-line');
+  const annotations = document.querySelectorAll('#df-body .df-annotation');
+  lines.forEach((line, i) => {
+    setTimeout(() => {
+      line.classList.add('visible');
+    }, i * 350);
+  });
+  annotations.forEach((ann, i) => {
+    setTimeout(() => {
+      ann.classList.add('visible');
+    }, i * 350 + 200);
+  });
+}
+
+/* ============================================================
+   SLIDE 15 — SECURITY CHECKLIST ANIMATION
+   ============================================================ */
+function animateSecurityChecklist() {
+  const items = document.querySelectorAll('.sec-item');
+  items.forEach((item, i) => {
+    setTimeout(() => {
+      item.classList.add('visible');
+      setTimeout(() => item.classList.add('checked'), 300);
+    }, i * 250);
+  });
+}
+
+/* ============================================================
+   SLIDE 16 — CONFETTI
+   ============================================================ */
+function triggerConfetti() {
+  const canvas = document.getElementById('confetti-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const particles = [];
+  const colors = ['#0db7ed', '#5bcefa', '#2ecc71', '#f39c12', '#e74c3c', '#9b59b6', '#fff'];
+  for (let i = 0; i < 150; i++) {
+    particles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height - canvas.height,
+      w: Math.random() * 10 + 5,
+      h: Math.random() * 6 + 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      vx: (Math.random() - 0.5) * 3,
+      vy: Math.random() * 3 + 2,
+      rot: Math.random() * 360,
+      rotSpeed: (Math.random() - 0.5) * 10,
+      opacity: 1
+    });
+  }
+  let frame = 0;
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let alive = false;
+    particles.forEach(p => {
+      if (p.opacity <= 0) return;
+      alive = true;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.rot += p.rotSpeed;
+      if (p.y > canvas.height) p.opacity -= 0.02;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot * Math.PI / 180);
+      ctx.globalAlpha = Math.max(0, p.opacity);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+      ctx.restore();
+    });
+    frame++;
+    if (alive && frame < 300) requestAnimationFrame(animate);
+    else ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  animate();
+}
+
+/* ============================================================
+   FULLSCREEN
+   ============================================================ */
+function toggleFullscreen() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const el = document.documentElement;
+    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  }
+}
+
+function updateFullscreenUI() {
+  const isFS = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  document.getElementById('fs-icon-enter').style.display = isFS ? 'none' : '';
+  document.getElementById('fs-icon-exit').style.display = isFS ? '' : 'none';
+  document.getElementById('fs-label').textContent = isFS ? 'Exit' : 'Fullscreen';
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenUI);
+document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+
+/* ============================================================
+   INIT
+   ============================================================ */
+updateUI();
+
+const hintEl = document.getElementById('keyboard-hint');
+let hintHidden = false;
+function hideHint() {
+  if (!hintHidden) { hintHidden = true; if (hintEl) hintEl.style.opacity = '0'; }
+}
+
+window.addEventListener('resize', () => {
+  const canvas = document.getElementById('confetti-canvas');
+  if (canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+});
+
+setTimeout(() => hideHint(), 8000);
+</script>
+</body>
+</html>
